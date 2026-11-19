@@ -11,5 +11,8 @@ if ENV['SENTRY_DSN'].present?
 
     # to track post data in sentry
     config.send_default_pii = true unless ENV['DISABLE_SENTRY_PII']
+
+    # Report a Sidekiq job only once its retries are exhausted, i.e. when its work is actually lost.
+    config.sidekiq.report_after_job_retries = true
   end
 end
