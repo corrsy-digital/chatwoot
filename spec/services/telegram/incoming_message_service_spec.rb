@@ -325,23 +325,45 @@ describe Telegram::IncomingMessageService do
       end
     end
 
-    context 'when the API call to get the download path returns an error' do
-      it 'does not process the attachment' do
-        allow(telegram_channel.inbox.channel).to receive(:get_telegram_file_path).and_return(nil)
-        params = {
+    context 'when the attachment cannot be downloaded' do
+      let(:params) do
+        {
           'update_id' => 2_342_342_343_242,
           'message' => {
-            'document' => {
-              'file_id' => 'AwADBAADbXXXXXXXXXXXGBdhD2l6_XX',
-              'file_name' => 'Screenshot 2021-09-27 at 2.01.14 PM.png',
-              'mime_type' => 'application/png',
-              'file_size' => 536_392
-            }
+            'caption' => 'my receipt',
+            'photo' => [{ 'file_id' => 'AgACAgIAAxkBAAI', 'file_unique_id' => 'AQADi', 'file_size' => 1_000, 'width' => 90, 'height' => 90 }]
           }.merge(message_params)
         }.with_indifferent_access
+      end
 
-        described_class.new(inbox: telegram_channel.inbox, params: params).perform
-        expect(telegram_channel.inbox.messages.first.attachments.count).to eq(0)
+      it 'raises a retryable error without saving the message when the download path is missing' do
+        allow(telegram_channel.inbox.channel).to receive(:get_telegram_file_path).and_return(nil)
+
+        expect { described_class.new(inbox: telegram_channel.inbox, params: params).perform }
+          .to raise_error(Telegram::AttachmentDownload::AttachmentDownloadError)
+        expect(telegram_channel.inbox.messages.count).to eq(0)
+      end
+
+      it 'raises a retryable error without saving the message when the download times out' do
+        allow(telegram_channel.inbox.channel).to receive(:get_telegram_file_path).and_return('https://chatwoot-assets.local/slow.png')
+        stub_request(:get, 'https://chatwoot-assets.local/slow.png').to_timeout
+
+        expect { described_class.new(inbox: telegram_channel.inbox, params: params).perform }
+          .to raise_error(Telegram::AttachmentDownload::AttachmentDownloadError)
+        expect(telegram_channel.inbox.messages.count).to eq(0)
+      end
+
+      it 'saves the message with a visible notice when attachment_fallback is set' do
+        allow(telegram_channel.inbox.channel).to receive(:get_telegram_file_path).and_return(nil)
+
+        described_class.new(inbox: telegram_channel.inbox, params: params, attachment_fallback: true).perform
+
+        message = telegram_channel.inbox.messages.first
+        expect(message.attachments.count).to eq(0)
+        expect(message.content).to eq(
+          "⚠️ The customer sent a photo, but it could not be downloaded from Telegram. Ask them to send it again.\n\nmy receipt"
+        )
+        expect(message.content_attributes['attachment_download_failed']).to eq('kind' => 'photo', 'file_id' => 'AgACAgIAAxkBAAI')
       end
     end
 

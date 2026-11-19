@@ -29,9 +29,28 @@ RSpec.describe Webhooks::TelegramEventsJob do
       allow(Telegram::IncomingMessageService).to receive(:new).and_return(process_service)
       allow(process_service).to receive(:perform)
       expect(Telegram::IncomingMessageService).to receive(:new).with(inbox: telegram_channel.inbox,
-                                                                     params: params['telegram'].with_indifferent_access)
+                                                                     params: params['telegram'].with_indifferent_access,
+                                                                     attachment_fallback: false)
       expect(process_service).to receive(:perform)
       described_class.perform_now(params.with_indifferent_access)
+    end
+
+    it 'retries attachment download failures, then processes with attachment_fallback' do
+      attempts = []
+      allow(Telegram::IncomingMessageService).to receive(:new) do |**kwargs|
+        attempts << kwargs[:attachment_fallback]
+        service = double
+        if kwargs[:attachment_fallback]
+          allow(service).to receive(:perform)
+        else
+          allow(service).to receive(:perform).and_raise(Telegram::AttachmentDownload::AttachmentDownloadError)
+        end
+        service
+      end
+
+      perform_enqueued_jobs { described_class.perform_later(params.with_indifferent_access) }
+
+      expect(attempts).to eq([false, false, false, false, true])
     end
 
     it 'logs a warning and does not process events if account is suspended' do

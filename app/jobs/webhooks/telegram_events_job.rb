@@ -1,6 +1,12 @@
 class Webhooks::TelegramEventsJob < ApplicationJob
   queue_as :default
 
+  # Retries cover ~2 minutes of Telegram API trouble; after that the message is saved with a
+  # notice instead of its attachment, so agents can ask the customer to resend it.
+  retry_on Telegram::AttachmentDownload::AttachmentDownloadError, wait: :polynomially_longer, attempts: 4 do |job, _error|
+    job.perform_with_attachment_fallback(*job.arguments)
+  end
+
   def perform(params = {})
     return unless params[:bot_token]
 
@@ -12,6 +18,11 @@ class Webhooks::TelegramEventsJob < ApplicationJob
     end
 
     process_event_params(channel, params)
+  end
+
+  def perform_with_attachment_fallback(params = {})
+    @attachment_fallback = true
+    perform(params)
   end
 
   private
@@ -38,7 +49,11 @@ class Webhooks::TelegramEventsJob < ApplicationJob
     if params.dig(:telegram, :edited_message).present? || params.dig(:telegram, :edited_business_message).present?
       Telegram::UpdateMessageService.new(inbox: channel.inbox, params: params['telegram'].with_indifferent_access).perform
     else
-      Telegram::IncomingMessageService.new(inbox: channel.inbox, params: params['telegram'].with_indifferent_access).perform
+      Telegram::IncomingMessageService.new(
+        inbox: channel.inbox,
+        params: params['telegram'].with_indifferent_access,
+        attachment_fallback: @attachment_fallback || false
+      ).perform
     end
   end
 end

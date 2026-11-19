@@ -4,7 +4,9 @@
 class Telegram::IncomingMessageService
   include ::FileTypeHelper
   include ::Telegram::ParamHelpers
-  pattr_initialize [:inbox!, :params!]
+  include ::Telegram::AttachmentDownload
+
+  pattr_initialize [:inbox!, :params!, { attachment_fallback: false }]
 
   def perform
     # chatwoot doesn't support group conversations at the moment
@@ -143,13 +145,8 @@ class Telegram::IncomingMessageService
   def attach_files
     return unless file
 
-    file_download_path = inbox.channel.get_telegram_file_path(file[:file_id])
-    if file_download_path.blank?
-      Rails.logger.info "Telegram file download path is blank for #{file[:file_id]} : inbox_id: #{inbox.id}"
-      return
-    end
-
-    attachment_file = Down.download(file_download_path, open_timeout: 5, read_timeout: 30)
+    attachment_file = download_attachment
+    return mark_attachment_download_failed if attachment_file.nil?
 
     @message.attachments.new(
       account_id: @message.account_id,
