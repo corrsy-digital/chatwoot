@@ -54,6 +54,18 @@ describe Telegram::IncomingMessageService do
         expect(Contact.all.first.name).to eq('Sojan Jose')
         expect(telegram_channel.inbox.messages.first.content).to eq('test')
       end
+
+      it 'saves the message when the avatar lookup times out' do
+        stub_request(:get, /api.telegram.org.*getUserProfilePhotos/).to_raise(Net::ReadTimeout)
+        params = {
+          'update_id' => 2_342_342_343_242,
+          'message' => { 'text' => 'test' }.merge(message_params)
+        }.with_indifferent_access
+
+        described_class.new(inbox: telegram_channel.inbox, params: params).perform
+
+        expect(telegram_channel.inbox.messages.first.content).to eq('test')
+      end
     end
 
     context 'when valid caption params' do
