@@ -150,6 +150,36 @@ RSpec.describe Avatar::AvatarFromUrlJob do
       expect(avatarable.additional_attributes['avatar_url_hash']).to eq(Digest::SHA256.hexdigest(valid_url))
     end
 
+    it 'attaches application/octet-stream avatars whose bytes are an allowed image' do
+      stub_request(:get, valid_url)
+        .to_return(
+          status: 200,
+          body: File.read(Rails.root.join('spec/assets/avatar.png')),
+          headers: { 'Content-Type' => 'application/octet-stream' }
+        )
+
+      described_class.perform_now(avatarable, valid_url)
+      avatarable.reload
+
+      expect(avatarable.avatar).to be_attached
+      expect(avatarable.avatar.blob.content_type).to eq('image/png')
+    end
+
+    it 'does not attach application/octet-stream avatars whose bytes are not an allowed image' do
+      stub_request(:get, valid_url)
+        .to_return(
+          status: 200,
+          body: File.read(Rails.root.join('spec/assets/sample.pdf')),
+          headers: { 'Content-Type' => 'application/octet-stream' }
+        )
+
+      expect { described_class.perform_now(avatarable, valid_url) }.not_to raise_error
+
+      avatarable.reload
+      expect(avatarable.avatar).not_to be_attached
+      expect(avatarable.additional_attributes['last_avatar_sync_at']).to be_present
+    end
+
     it 'updates sync attributes when the avatar URL is blocked by SSRF protection' do
       blocked_url = 'http://127.0.0.1/avatar.png'
 
@@ -190,7 +220,7 @@ RSpec.describe Avatar::AvatarFromUrlJob do
         valid_url,
         max_bytes: Avatar::AvatarFromUrlJob::MAX_DOWNLOAD_SIZE,
         allowed_content_type_prefixes: [],
-        allowed_content_types: Avatar::AvatarFromUrlJob::ALLOWED_CONTENT_TYPES
+        allowed_content_types: Avatar::AvatarFromUrlJob::FETCH_CONTENT_TYPES
       ).and_yield(
         SafeFetch::Result.new(
           tempfile: invalid_file,

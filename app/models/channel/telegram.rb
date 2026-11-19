@@ -22,6 +22,7 @@ class Channel::Telegram < ApplicationRecord
 
   self.table_name = 'channel_telegram'
   EDITABLE_ATTRS = [:bot_token].freeze
+  API_TIMEOUT = 10
 
   before_validation :ensure_valid_bot_token, on: :create
   validates :bot_token, presence: true, uniqueness: true
@@ -43,7 +44,7 @@ class Channel::Telegram < ApplicationRecord
 
   def get_telegram_profile_image(user_id)
     # get profile image from telegram
-    response = HTTParty.get("#{telegram_api_url}/getUserProfilePhotos", query: { user_id: user_id })
+    response = HTTParty.get("#{telegram_api_url}/getUserProfilePhotos", query: { user_id: user_id }, timeout: API_TIMEOUT)
     return nil unless response.success?
 
     photos = response.parsed_response.dig('result', 'photos')
@@ -53,7 +54,7 @@ class Channel::Telegram < ApplicationRecord
   end
 
   def get_telegram_file_path(file_id)
-    response = HTTParty.get("#{telegram_api_url}/getFile", query: { file_id: file_id })
+    response = HTTParty.get("#{telegram_api_url}/getFile", query: { file_id: file_id }, timeout: API_TIMEOUT)
     return nil unless response.success?
 
     "https://api.telegram.org/file/bot#{bot_token}/#{response.parsed_response['result']['file_path']}"

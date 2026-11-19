@@ -10,6 +10,9 @@ class Avatar::AvatarFromUrlJob < ApplicationJob
   queue_as :purgable
 
   ALLOWED_CONTENT_TYPES = Avatarable::ALLOWED_AVATAR_CONTENT_TYPES
+  # Telegram's file API serves every file as application/octet-stream; such files are sniffed before attaching.
+  SNIFFED_CONTENT_TYPE = 'application/octet-stream'.freeze
+  FETCH_CONTENT_TYPES = (ALLOWED_CONTENT_TYPES + [SNIFFED_CONTENT_TYPE]).freeze
   MAX_DOWNLOAD_SIZE = 15.megabytes
   RATE_LIMIT_WINDOW = 1.minute
 
@@ -38,7 +41,7 @@ class Avatar::AvatarFromUrlJob < ApplicationJob
       avatar_url,
       max_bytes: MAX_DOWNLOAD_SIZE,
       allowed_content_type_prefixes: [],
-      allowed_content_types: ALLOWED_CONTENT_TYPES
+      allowed_content_types: FETCH_CONTENT_TYPES
     ) do |avatar_file|
       attach_avatar(avatarable, avatar_file)
     end
@@ -47,11 +50,22 @@ class Avatar::AvatarFromUrlJob < ApplicationJob
   def attach_avatar(avatarable, avatar_file)
     raise SafeFetch::FetchError, 'Invalid file' unless valid_file?(avatar_file)
 
+    content_type = resolved_content_type(avatar_file)
+    unless ALLOWED_CONTENT_TYPES.include?(content_type)
+      raise SafeFetch::UnsupportedContentTypeError, "content-type not allowed: #{avatar_file.content_type} (detected #{content_type})"
+    end
+
     avatarable.avatar.attach(
       io: avatar_file.tempfile,
       filename: avatar_file.original_filename,
-      content_type: avatar_file.content_type
+      content_type: content_type
     )
+  end
+
+  def resolved_content_type(avatar_file)
+    return avatar_file.content_type unless avatar_file.content_type == SNIFFED_CONTENT_TYPE
+
+    Marcel::MimeType.for(avatar_file.tempfile).tap { avatar_file.tempfile.rewind }
   end
 
   def log_http_error(avatar_url, error)

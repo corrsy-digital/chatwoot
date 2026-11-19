@@ -62,8 +62,7 @@ class Telegram::IncomingMessageService
   def update_contact_avatar
     return if @contact.avatar.attached?
 
-    avatar_url = inbox.channel.get_telegram_profile_image(telegram_params_from_id)
-    ::Avatar::AvatarFromUrlJob.perform_later(@contact, avatar_url) if avatar_url
+    ::Telegram::ContactAvatarJob.perform_later(@contact, inbox.channel, telegram_params_from_id)
   end
 
   def conversation_params
@@ -150,9 +149,7 @@ class Telegram::IncomingMessageService
       return
     end
 
-    attachment_file = Down.download(
-      inbox.channel.get_telegram_file_path(file[:file_id])
-    )
+    attachment_file = Down.download(file_download_path, open_timeout: 5, read_timeout: 30)
 
     @message.attachments.new(
       account_id: @message.account_id,

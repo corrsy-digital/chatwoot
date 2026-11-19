@@ -56,6 +56,28 @@ describe Telegram::IncomingMessageService do
       end
     end
 
+    context 'when the contact has no avatar' do
+      let(:params) do
+        { 'update_id' => 2_342_342_343_242, 'message' => { 'text' => 'test' }.merge(message_params) }.with_indifferent_access
+      end
+
+      it 'looks up the avatar asynchronously instead of while processing the message' do
+        expect do
+          described_class.new(inbox: telegram_channel.inbox, params: params).perform
+        end.to have_enqueued_job(Telegram::ContactAvatarJob).with(instance_of(Contact), telegram_channel, 23)
+
+        expect(a_request(:get, /getUserProfilePhotos/)).not_to have_been_made
+      end
+
+      it 'saves the message even when the Telegram API times out' do
+        stub_request(:get, /api.telegram.org.*getUserProfilePhotos/).to_timeout
+
+        described_class.new(inbox: telegram_channel.inbox, params: params).perform
+
+        expect(telegram_channel.inbox.messages.first.content).to eq('test')
+      end
+    end
+
     context 'when valid caption params' do
       it 'creates appropriate conversations, message and contacts' do
         params = {
