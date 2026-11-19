@@ -64,6 +64,9 @@ class Telegram::IncomingMessageService
 
     avatar_url = inbox.channel.get_telegram_profile_image(telegram_params_from_id)
     ::Avatar::AvatarFromUrlJob.perform_later(@contact, avatar_url) if avatar_url
+  rescue StandardError => e
+    # A failed avatar lookup must never stop the message from being saved.
+    Rails.logger.warn "Telegram avatar lookup failed for contact #{@contact.id}: #{e.class} - #{e.message}"
   end
 
   def conversation_params
